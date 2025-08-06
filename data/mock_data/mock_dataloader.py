@@ -45,3 +45,12 @@ class MockDataloader:
         series = pd.Series(data, index=date_rng, name="mock_data")
 
         return series
+
+
+if __name__ == "__main__":
+    dataloader = MockDataloader(
+        start_time="2025-01-01 00:00:00",
+        end_time="2025-02-01 16:00:00",
+        time_granularity="1h",
+    )
+    print(dataloader.generate())
