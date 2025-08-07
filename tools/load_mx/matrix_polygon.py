@@ -17,12 +17,12 @@ class PolygonDataMatrix(BaseMatrix):
     def __init__(
         self, start_time, end_time, time_granularity, matrix_cache_folder, data_folder
     ):
-        from tools.time_list import get_time_list
         from data.polygon.data_loader import PolygonOHLCDataloader
 
         self.matrix_type = "Polygon"
         universe = ["I:SPX"]
-        self.time_list = get_time_list()
+        self.time_list = self._generate_time_list(start_time, end_time, time_granularity)
+        
         super().__init__(
             universe,
             start_time,
@@ -37,6 +37,37 @@ class PolygonDataMatrix(BaseMatrix):
             api_key=api_key, time_granularity=time_granularity
         )
 
+    def _generate_time_list(self, start_time, end_time, time_granularity):
+        """
+        Generate a time_list with the specified granularity between start_time and end_time.
+
+        Args:
+            start_time (str): Start date in 'YYYY-MM-DD'.
+            end_time (str): End date in 'YYYY-MM-DD'.
+            time_granularity (str): Granularity ('1h', '5m', etc.).
+
+        Returns:
+            pd.Index: Time index with appropriate frequency.
+        """
+        granularity_map = {
+            '1h': 'H',
+            '5m': '5min',
+            '1m': 'min',
+            '4h': '4H',
+            '1d': 'D'
+        }
+        if time_granularity not in granularity_map:
+            raise ValueError(f"Unsupported time_granularity: {time_granularity}")
+
+        freq = granularity_map[time_granularity]
+        time_list = pd.date_range(
+            start=start_time,
+            end=end_time,
+            freq=freq,
+            inclusive='both'
+        )
+        return pd.Index(time_list.tz_localize(None))
+
     def get_ohlcv(self, column):
         """
         Fetches OHLCV data for the specified column and aligns it with the original underlying_df shape,
@@ -49,43 +80,34 @@ class PolygonDataMatrix(BaseMatrix):
         Returns:
             pd.DataFrame: The aligned underlying_df with fetched data for the specified column.
         """
-        # Fetch OHLCV data from PolygonOHLCDataloader
         ohlcv_df = self.dl.generate(
             self.start_time, self.end_time, src=column
         )
 
-        # Create a new DataFrame with the same shape as the original underlying_df
         aligned_df = pd.DataFrame(
             np.nan,
             index=self.time_list,
             columns=self.universe
         )
 
-        # Align fetched data with the time_list index using merge_asof for PIT
         if not ohlcv_df.empty:
-            # Convert ohlcv_df to a DataFrame with a column for values and reset index
             ohlcv_df = ohlcv_df.to_frame(name='value').reset_index()
-            # Remove timezone from ohlcv_df timestamps to match time_list (assumed naive)
             ohlcv_df['timestamp'] = ohlcv_df['timestamp'].dt.tz_localize(None)
 
-            # Create a DataFrame for time_list
             time_list_df = pd.DataFrame(index=self.time_list).reset_index()
             time_list_df.columns = ['timestamp']
 
-            # Perform merge_asof to map ohlcv_df values to the nearest prior timestamp in time_list
             merged_df = pd.merge_asof(
                 time_list_df.sort_values('timestamp'),
                 ohlcv_df.sort_values('timestamp'),
                 on='timestamp',
-                direction='backward',  # Match to the nearest prior timestamp
+                direction='backward',
                 allow_exact_matches=True
             )
 
-            # Set the merged values back to aligned_df['I:SPX']
             merged_df = merged_df.set_index('timestamp')
             aligned_df['I:SPX'] = merged_df['value'].reindex(self.time_list, fill_value=np.nan)
 
-        # Set the aligned DataFrame as underlying_df
         self.underlying_df = aligned_df
 
-        return self.underlying_df
+        return self
