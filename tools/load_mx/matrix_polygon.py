@@ -70,44 +70,38 @@ class PolygonDataMatrix(BaseMatrix):
 
     def get_ohlcv(self, column):
         """
-        Fetches OHLCV data for the specified column and aligns it with the original underlying_df shape,
-        mapping values to the nearest prior timestamp in time_list to ensure point-in-time (PIT) data,
-        preserving NaN values where no data is available.
+        Fetches OHLCV data for the specified column, sets underlying_df with non-NaN values,
+        and updates time_list to match the non-NaN timestamps.
 
         Args:
             column (str): The OHLCV column to fetch (e.g., 'o', 'h', 'l', 'c').
 
         Returns:
-            pd.DataFrame: The aligned underlying_df with fetched data for the specified column.
+            PolygonDataMatrix: The updated matrix object.
         """
+        # Fetch OHLCV data
         ohlcv_df = self.dl.generate(
             self.start_time, self.end_time, src=column
         )
 
-        aligned_df = pd.DataFrame(
-            np.nan,
-            index=self.time_list,
-            columns=self.universe
-        )
-
+        # Initialize aligned_df with non-NaN data
         if not ohlcv_df.empty:
-            ohlcv_df = ohlcv_df.to_frame(name='value').reset_index()
-            ohlcv_df['timestamp'] = ohlcv_df['timestamp'].dt.tz_localize(None)
-
-            time_list_df = pd.DataFrame(index=self.time_list).reset_index()
-            time_list_df.columns = ['timestamp']
-
-            merged_df = pd.merge_asof(
-                time_list_df.sort_values('timestamp'),
-                ohlcv_df.sort_values('timestamp'),
-                on='timestamp',
-                direction='backward',
-                allow_exact_matches=True
+            # Convert to DataFrame, remove NaN values, and make timestamps timezone-naive
+            aligned_df = ohlcv_df.to_frame(name='I:SPX').dropna()
+            aligned_df.index = aligned_df.index.tz_localize(None)
+            
+            # Update time_list to match non-NaN timestamps
+            self.time_list = pd.Index(aligned_df.index)
+            
+            # Set underlying_df
+            self.underlying_df = aligned_df
+        else:
+            # If ohlcv_df is empty, keep empty DataFrame with original time_list
+            self.underlying_df = pd.DataFrame(
+                np.nan,
+                index=self.time_list,
+                columns=self.universe
             )
 
-            merged_df = merged_df.set_index('timestamp')
-            aligned_df['I:SPX'] = merged_df['value'].reindex(self.time_list, fill_value=np.nan)
-
-        self.underlying_df = aligned_df
 
         return self
